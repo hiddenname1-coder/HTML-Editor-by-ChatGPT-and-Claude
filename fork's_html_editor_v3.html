@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fork's HTML Editor</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;background:#eef1f5;color:#222}
+header{height:58px;background:#20242b;color:#fff;display:flex;align-items:center;padding:0 14px;gap:8px}
+header h1{font-size:18px;margin:0 12px 0 0}button{border:0;border-radius:7px;padding:9px 12px;cursor:pointer;font-weight:600}
+header button{background:#fff;color:#222}header button.primary{background:#62d39a}
+main{height:calc(100vh - 58px);display:grid;grid-template-columns:210px 1fr 260px;overflow:hidden}
+aside{background:#fff;padding:14px;overflow:auto;border-right:1px solid #ddd}.right{border-right:0;border-left:1px solid #ddd}
+h2{font-size:14px;margin:4px 0 12px}.tool{width:100%;text-align:left;background:#f3f5f7;margin-bottom:8px}
+.tool:hover{background:#e4e8ed}.help{font-size:12px;color:#666;line-height:1.6}
+#area{overflow:auto;padding:28px;display:flex;justify-content:center;align-items:flex-start}
+#page{width:800px;min-height:900px;background:#fff;box-shadow:0 2px 15px #0002;padding:35px;position:relative;overflow:hidden}
+.item{position:absolute;border:1px solid transparent;padding:5px;margin:0;cursor:grab;touch-action:none;user-select:text}.item:active{cursor:grabbing}
+.item:hover{border-color:#8bb7ff}.item.selected{border:2px solid #3478f6}
+img.item{max-width:100%;display:block}.prop{margin-bottom:13px}.prop label{display:block;font-size:12px;color:#555;margin-bottom:4px}
+input,textarea,select{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;background:#fff}
+textarea{min-height:70px;resize:vertical}.row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+#empty{color:#999;text-align:center;padding-top:260px;pointer-events:none}
+.noborder-text{outline:none}.noborder-text::-moz-focus-inner{border:0;padding:0}
+.preview{position:fixed;inset:0;background:#fff;z-index:20;display:none;overflow:auto}.preview iframe{width:100%;height:100%;border:0}
+.close{position:fixed;right:15px;top:12px;z-index:21;background:#222;color:#fff}
+@media(max-width:800px){main{grid-template-columns:150px 1fr}.right{display:none}#area{padding:10px}#page{width:100%;min-height:700px}}
+</style>
+</head>
+<body>
+<header>
+<h1>Fork's HTML Editor</h1>
+<button onclick="newPage()">新規</button>
+<button onclick="undo()">↶ 戻す</button>
+<button onclick="redo()">↷ 進む</button>
+<button onclick="openPreview()">▶ プレビュー</button>
+<button class="primary" onclick="downloadHTML()">💾 HTML保存</button>
+</header>
+<main>
+<aside>
+<h2>部品を追加</h2>
+<button class="tool" onclick="add('h1')">🔤 見出し</button>
+<button class="tool" onclick="add('p')">📝 文章</button>
+<button class="tool" onclick="add('button')">🔘 ボタン</button>
+<button class="tool" onclick="add('a')">🔗 リンク</button>
+<button class="tool" onclick="add('img')">🖼️ 画像</button>
+<button class="tool" onclick="add('video')">🎬 動画</button>
+<button class="tool" onclick="add('audio')">🎵 音声</button>
+<button class="tool" onclick="add('box')">📦 ボックス</button>
+<button class="tool" onclick="add('hr')">➖ 区切り線</button>
+<p class="help">部品を追加してクリックすると、右側から編集できます。</p>
+<h2>ページ設定</h2>
+<div class="prop"><label>ページ名</label><input id="pagename" value="My Website"></div>
+<div class="row"><div class="prop"><label>幅(px)</label><input type="number" id="pagewidth" value="800" oninput="setPageSize(this.value,null)"></div><div class="prop"><label>高さ(px)</label><input type="number" id="pageheight" value="900" oninput="setPageSize(null,this.value)"></div></div>
+<div class="prop"><label>比率テンプレート</label>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+<button type="button" class="tool" style="width:auto;flex:1 1 45%;margin-bottom:0" onclick="applyPreset(800,900)">標準</button>
+<button type="button" class="tool" style="width:auto;flex:1 1 45%;margin-bottom:0" onclick="applyPreset(1920,1080)">16:9</button>
+<button type="button" class="tool" style="width:auto;flex:1 1 45%;margin-bottom:0" onclick="applyPreset(1024,768)">4:3</button>
+<button type="button" class="tool" style="width:auto;flex:1 1 45%;margin-bottom:0" onclick="applyPreset(1080,1920)">9:16(スマホ縦)</button>
+<button type="button" class="tool" style="width:auto;flex:1 1 45%;margin-bottom:0" onclick="applyPreset(794,1123)">A4(印刷)</button>
+</div>
+</div>
+<div class="prop"><label>ページ背景色</label><input type="color" id="pagebg" value="#ffffff" oninput="setPageBg(this.value)"></div>
+</aside>
+<section id="area"><div id="page"><div id="empty">ここに部品を追加してください</div></div></section>
+<aside class="right">
+<h2>プロパティ</h2><div id="props" class="help">編集したい部品をクリックしてください。</div>
+</aside>
+</main>
+<div id="preview" class="preview"><button class="close" onclick="closePreview()">閉じる</button><iframe id="frame"></iframe></div>
+<script>
+let selected=null, history=[], future=[];
+const page=document.getElementById('page');
+function snapshot(){history.push(page.innerHTML);if(history.length>30)history.shift();future=[]}
+function clean(){document.getElementById('empty')?.remove()}
+function add(type){
+ finishPropEdit(); snapshot();clean();let e;
+ if(type==='h1'){e=document.createElement('h1');e.textContent='新しい見出し'}
+ if(type==='p'){e=document.createElement('p');e.textContent='ここに文章を入力してください。'}
+ if(type==='button'){e=document.createElement('button');e.textContent='ボタン'}
+ if(type==='a'){e=document.createElement('a');e.textContent='リンク';e.href='#'}
+ if(type==='img'){e=document.createElement('img');e.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"><rect width="100%" height="100%" fill="#ddd"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="28">画像</text></svg>');e.alt='画像'}
+ if(type==='video'){e=document.createElement('video');e.setAttribute('controls','');e.style.width='400px';e.style.display='block';e.style.background='#000'}
+ if(type==='audio'){e=document.createElement('audio');e.setAttribute('controls','');e.style.width='300px';e.style.display='block'}
+ if(type==='box'){e=document.createElement('div');e.textContent='ボックス';e.style.padding='25px';e.style.background='#f1f3f5';e.style.borderRadius='10px'}
+ if(type==='hr')e=document.createElement('hr');
+ e.classList.add('item');page.appendChild(e);
+ e.style.left=(35+((page.querySelectorAll('.item').length-1)%3)*230)+'px';
+ e.style.top=(35+Math.floor((page.querySelectorAll('.item').length-1)/3)*100)+'px';
+ makeDraggable(e);select(e)
+}
+function select(e){if(selected)selected.classList.remove('selected');selected=e;e.classList.add('selected');renderProps()}
+function renderProps(){
+ const p=document.getElementById('props'); if(!selected){p.innerHTML='編集したい部品をクリックしてください。';return}
+ let html='';
+ if(selected.tagName!=='IMG'&&selected.tagName!=='HR'&&selected.tagName!=='VIDEO'&&selected.tagName!=='AUDIO'){
+   html+=`<div class="prop"><label>文字</label><textarea id="txt">${selected.textContent}</textarea></div>`;
+   html+=`<div class="prop"><label><input type="checkbox" id="noborder" style="width:auto;display:inline-block;margin-right:6px" ${selected.classList.contains('noborder-text')?'checked':''}> 文字周りの枠を透過(非表示)にする</label></div>`;
+ }
+ if(selected.tagName==='A'||selected.tagName==='BUTTON'){
+   html+=`<div class="prop"><label>リンク先</label><input id="href" value="${selected.getAttribute('href')||''}"><p class="help">URL(https://...)のほか、Folder/otherPage/index.html のような相対パスも指定できます。</p></div>`;
+   html+=`<div class="prop"><label><input type="checkbox" id="newtab" style="width:auto;display:inline-block;margin-right:6px" ${selected.getAttribute('target')==='_blank'?'checked':''}> 新しいタブで開く</label></div>`;
+ }
+ if(selected.tagName==='IMG')html+=`<div class="prop"><label>画像URL</label><input id="src" value="${selected.src}"><p class="help">端末の画像ファイルを使う場合は、まず画像をオンラインURLにする必要があります。</p></div>`;
+ if(selected.tagName==='VIDEO'||selected.tagName==='AUDIO'){
+   const isVideo=selected.tagName==='VIDEO';
+   html+=`<div class="prop"><label>${isVideo?'動画':'音声'}URL</label><input id="src" value="${selected.getAttribute('src')||''}"><p class="help">直接再生できる${isVideo?'動画(mp4など)':'音声(mp3など)'}ファイルのURLを入力してください。</p></div>`;
+   html+=`<div class="prop"><label><input type="checkbox" id="autoplay" style="width:auto;display:inline-block;margin-right:6px" ${selected.hasAttribute('autoplay')?'checked':''}> 自動再生する${isVideo?'(自動的にミュートされます)':''}</label></div>`;
+   if(!isVideo)html+=`<div class="prop"><label><input type="checkbox" id="loop" style="width:auto;display:inline-block;margin-right:6px" ${selected.hasAttribute('loop')?'checked':''}> ループ再生する</label></div>`;
+ }
+ {
+   const bgTransparent = !selected.style.backgroundColor || selected.style.backgroundColor==='transparent';
+   html+=`<div class="row"><div class="prop"><label>文字色</label><input type="color" id="color" value="${rgb(selected.style.color,'#222222')}"></div><div class="prop"><label>背景色</label><input type="color" id="bg" value="${rgb(selected.style.backgroundColor,'#ffffff')}" ${bgTransparent?'disabled':''}></div></div>`;
+   html+=`<div class="prop"><label><input type="checkbox" id="bgtransparent" style="width:auto;display:inline-block;margin-right:6px" ${bgTransparent?'checked':''}> 背景を透明にする</label></div>`;
+ }
+ html+=`<div class="row"><div class="prop"><label>文字サイズ(px)</label><input type="number" id="size" value="${parseInt(getComputedStyle(selected).fontSize)||16}"></div><div class="prop"><label>余白(px)</label><input type="number" id="pad" value="${parseInt(selected.style.padding)||5}"></div></div>`;
+ html+=`<div class="prop"><label>重なり順 (z-index)</label><input type="number" id="zindex" value="${parseInt(selected.style.zIndex)||0}"></div>`;
+ html+=`<div class="prop"><label>不透明度 (Alpha): <span id="alphaVal">${selected.style.opacity!==''?selected.style.opacity:'1.00'}</span></label><input type="range" id="alpha" min="0" max="1" step="0.01" value="${selected.style.opacity!==''?selected.style.opacity:1}"></div>`;
+ html+=`<button onclick="deleteSelected()" style="width:100%;background:#fee;color:#b00">🗑️ 削除</button>`;
+ p.innerHTML=html;
+ ['txt','noborder','href','newtab','src','autoplay','loop','color','bg','size','pad','zindex','alpha'].forEach(id=>document.getElementById(id)?.addEventListener('input',applyProps));
+ document.getElementById('bgtransparent')?.addEventListener('change',()=>{applyProps();renderProps()});
+}
+function rgb(v, fallback){if(!v)return fallback;let m=v.match(/\\d+/g);return m&&m.length>=3?'#'+m.slice(0,3).map(x=>Number(x).toString(16).padStart(2,'0')).join(''):fallback}
+function prepareExportHTML(rawHTML){
+ const tmp=document.createElement('div');
+ tmp.innerHTML=rawHTML;
+ tmp.querySelectorAll('button[href]').forEach(btn=>{
+   const href=btn.getAttribute('href').replace(/'/g,"\\'");
+   if(btn.getAttribute('target')==='_blank')btn.setAttribute('onclick',`window.open('${href}','_blank')`);
+   else btn.setAttribute('onclick',`location.href='${href}'`);
+ });
+ tmp.querySelectorAll('.item').forEach(el=>{
+   el.classList.remove('item');
+   if(el.classList.length===0)el.removeAttribute('class');
+ });
+ return tmp.innerHTML;
+}
+let propBeforeEdit='';
+function applyProps(){
+ if(!selected)return;
+ if(!propBeforeEdit)propBeforeEdit=page.innerHTML;
+ if(document.getElementById('txt'))selected.textContent=document.getElementById('txt').value;
+ if(document.getElementById('noborder')){
+   selected.classList.toggle('noborder-text',document.getElementById('noborder').checked);
+ }
+ if(document.getElementById('href'))selected.setAttribute('href',document.getElementById('href').value);
+ if(document.getElementById('newtab')){
+   if(document.getElementById('newtab').checked)selected.setAttribute('target','_blank');
+   else selected.removeAttribute('target');
+ }
+ if(document.getElementById('src'))selected.src=document.getElementById('src').value;
+ if(document.getElementById('loop')){
+   if(document.getElementById('loop').checked)selected.setAttribute('loop','');
+   else selected.removeAttribute('loop');
+ }
+ if(document.getElementById('autoplay')){
+   if(document.getElementById('autoplay').checked){
+     selected.setAttribute('autoplay','');
+     if(selected.tagName==='VIDEO')selected.setAttribute('muted','');
+   } else {
+     selected.removeAttribute('autoplay');
+     if(selected.tagName==='VIDEO')selected.removeAttribute('muted');
+   }
+ }
+ if(document.getElementById('color'))selected.style.color=document.getElementById('color').value;
+ if(document.getElementById('bgtransparent')){
+   if(document.getElementById('bgtransparent').checked)selected.style.backgroundColor='transparent';
+   else if(document.getElementById('bg'))selected.style.backgroundColor=document.getElementById('bg').value;
+ }
+ if(document.getElementById('size'))selected.style.fontSize=document.getElementById('size').value+'px';
+ if(document.getElementById('pad'))selected.style.padding=document.getElementById('pad').value+'px';
+ if(document.getElementById('zindex'))selected.style.zIndex=document.getElementById('zindex').value;
+ if(document.getElementById('alpha')){
+   selected.style.opacity=document.getElementById('alpha').value;
+   const av=document.getElementById('alphaVal');if(av)av.textContent=parseFloat(document.getElementById('alpha').value).toFixed(2);
+ }
+ selected.classList.add('item');
+}
+function finishPropEdit(){
+ if(propBeforeEdit && propBeforeEdit!==page.innerHTML){
+   history.push(propBeforeEdit);
+   if(history.length>30)history.shift();
+   future=[];
+ }
+ propBeforeEdit='';
+}
+function deleteSelected(){if(!selected)return;finishPropEdit();snapshot();selected.remove();selected=null;renderProps()}
+
+function makeDraggable(el){
+ let dragging=false,moved=false,startX=0,startY=0,startL=0,startT=0,oldHTML='';
+ el.addEventListener('pointerdown',ev=>{
+   if(ev.pointerType==='mouse' && ev.button!==0)return;
+   select(el);
+   dragging=true;moved=false;
+   startX=ev.clientX;startY=ev.clientY;
+   startL=parseFloat(el.style.left)||el.offsetLeft;
+   startT=parseFloat(el.style.top)||el.offsetTop;
+   oldHTML=page.innerHTML;
+   el.setPointerCapture?.(ev.pointerId);
+ });
+ el.addEventListener('pointermove',ev=>{
+   if(!dragging)return;
+   const dx=ev.clientX-startX,dy=ev.clientY-startY;
+   if(Math.abs(dx)+Math.abs(dy)>5){
+     if(!moved){
+       moved=true;
+       history.push(oldHTML);
+       if(history.length>30)history.shift();
+       future=[];
+     }
+     el.style.left=Math.max(0,Math.min(page.clientWidth-el.offsetWidth,startL+dx))+'px';
+     el.style.top=Math.max(0,Math.min(page.clientHeight-el.offsetHeight,startT+dy))+'px';
+   }
+ });
+ el.addEventListener('pointerup',ev=>{
+   if(!dragging)return;
+   dragging=false;
+   el.releasePointerCapture?.(ev.pointerId);
+   if(!moved)select(el);
+ });
+ el.addEventListener('pointercancel',()=>dragging=false);
+}
+document.querySelectorAll('#page .item').forEach(makeDraggable);
+page.addEventListener('click',e=>{
+ if(e.target.closest('a,button'))e.preventDefault();
+ if(e.target.classList.contains('item'))select(e.target);
+});
+
+function undo(){finishPropEdit();if(!history.length)return;future.push(page.innerHTML);page.innerHTML=history.pop();document.querySelectorAll('#page .item').forEach(makeDraggable);selected=null;renderProps()}
+function redo(){finishPropEdit();if(!future.length)return;history.push(page.innerHTML);page.innerHTML=future.pop();document.querySelectorAll('#page .item').forEach(makeDraggable);selected=null;renderProps()}
+function newPage(){if(confirm('ページを空にしますか？')){finishPropEdit();snapshot();page.innerHTML='<div id="empty">ここに部品を追加してください</div>';selected=null;renderProps();setPageBg('#ffffff');document.getElementById('pagebg').value='#ffffff';document.getElementById('pagename').value='My Website';applyPreset(800,900)}}
+function setPageSize(w,h){
+ if(w!==null&&w!=='')page.style.width=w+'px';
+ if(h!==null&&h!=='')page.style.minHeight=h+'px';
+}
+function applyPreset(w,h){
+ document.getElementById('pagewidth').value=w;
+ document.getElementById('pageheight').value=h;
+ setPageSize(w,h);
+}
+function setPageBg(v){page.style.background=v}
+function openPreview(){
+ document.querySelectorAll('.item').forEach(e=>e.classList.remove('selected'));
+ const pname=document.getElementById('pagename').value||'My Website';
+ const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${pname}</title><style>body{font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;margin:0 auto;padding:35px;position:relative;width:${page.style.width||'800px'};min-height:${page.style.minHeight||'900px'};box-sizing:border-box;background:${page.style.background||'#fff'}}button{padding:10px 18px;border:0;border-radius:7px}.noborder-text{outline:none}.noborder-text::-moz-focus-inner{border:0;padding:0}</style></head><body>${prepareExportHTML(page.innerHTML)}</body></html>`;
+ document.getElementById('frame').srcdoc=html;document.getElementById('preview').style.display='block';
+}
+function closePreview(){document.getElementById('preview').style.display='none';if(selected)selected.classList.add('selected')}
+function downloadHTML(){
+ const body=prepareExportHTML(page.innerHTML).replaceAll(' id="empty"','');
+ const pname=document.getElementById('pagename').value||'My Website';
+ const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${pname}</title><style>body{font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;margin:0 auto;padding:35px;position:relative;width:${page.style.width||'800px'};min-height:${page.style.minHeight||'900px'};box-sizing:border-box;background:${page.style.background||'#fff'}}button{padding:10px 18px;border:0;border-radius:7px}.noborder-text{outline:none}.noborder-text::-moz-focus-inner{border:0;padding:0}</style></head><body>${body}</body></html>`;
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download=(pname.replace(/[\\/:*?"<>|]/g,'').trim()||'index')+'.html';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)
+}
+</script>
+</body></html>
